@@ -6,10 +6,9 @@
 #include <arpa/inet.h>
 #include <sys/types.h>
 #include <sys/socket.h>
-#include "llist.h"
 #include "h264tortp.h"
 
-#define DEFAULT_DEST_PORT           1234
+#define DEFAULT_DEST_PORT           5004
 #define RTP_PAYLOAD_MAX_SIZE        1400
 #define SEND_BUF_SIZE               1500
 #define NAL_BUF_SIZE                1500 * 50
@@ -18,7 +17,8 @@
 #define DEBUG_PRINT         0
 #define debug_print(fmt, ...) \
     do { if (DEBUG_PRINT) fprintf(stderr, "-------%s: %d: %s():---" fmt "----\n", \
-            __FILE__, __LINE__, __func__, ##__VA_ARGS__);} while (0)
+            __FILE__, __LINE__, __func__, ##__VA_ARGS__);\
+    } while (0)
 
 
 uint16_t DEST_PORT;
@@ -446,11 +446,13 @@ int main(int argc, char **argv)
         exit(errno);
     }
 
+#if 0
     fp_test = fopen("file_test.h264", "w");
     if (!fp_test) {
         perror("fopen");
         exit(errno);
     }
+#endif
 
     if (argc > 3)
         DEST_PORT = atoi(argv[3]);
@@ -468,15 +470,17 @@ int main(int argc, char **argv)
         fputc(0, fp_test);
         fputc(1, fp_test);
         fwrite(nal_buf, len, 1, fp_test);
-        debug_print();
+        
 #endif
+        //fprintf(stderr, "nal_buf len is %d\n", len);
         ret = h264nal2rtp_send(25, nal_buf, len, CLIENT_IP_LIST);
         if (ret != -1)
             usleep(1000 * 20);
     }
-    debug_print();
-
+    //debug_print();
+#if 0
     fclose(fp_test);
+#endif
     fclose(fp);
     return 0;
 }
