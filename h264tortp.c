@@ -591,7 +591,10 @@ int main(int argc, char **argv)
         while (more_len<src_len) {
             //printf("copy nal: %d\n",i);
             ret=copy_nal(srcbuf,src_len,more_len, nal_buf, &len,fp2);
-            if (ret==-1) break;
+            if (ret==-1) {
+                more_len=0;
+                break;
+            }
             more_len=ret;
             
 
@@ -602,6 +605,7 @@ int main(int argc, char **argv)
                 usleep(1000 * 20);
 
             if(src_len==max_buf && src_len-more_len<min_buf){
+                printf("%d# more_len:%d, src_len:%d\n",i,more_len,src_len);
                 break;
             }
         }
