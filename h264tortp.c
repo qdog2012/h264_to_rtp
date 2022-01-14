@@ -554,18 +554,30 @@ int main(int argc, char **argv)
     add_client_list(CLIENT_IP_LIST, argv[2]);
 
     fprintf(stderr, "DEST_PORT is %d\n", DEST_PORT);
-    int max_buf=1024*800;
+    int max_buf=1024*200;
+    int min_buf=1024*50;
     char srcbuf[max_buf];
     int src_len=1;
     int more_len=0;
     while (src_len>0) {
-        src_len=read(fp,srcbuf,max_buf);
+
+        if (more_len>0 && more_len!=src_len){
+            memcpy(srcbuf,srcbuf+more_len,src_len-more_len);
+            printf("merga buffers, more_len:%d, src_len:%d\n",more_len,src_len);
+            src_len=read(fp,srcbuf+(src_len-more_len),max_buf-(src_len-more_len)) + src_len - more_len;
+            //src_len=max_buf;
+        }
+        else{
+            src_len=read(fp,srcbuf,max_buf);
+            printf("read file: %d\n",src_len);
+        }
+        
         //printf("%s",srcbuf);
         //continue;
         ret=0;
         more_len=0;
         i++;
-        //printf("read file: %d\n",src_len);
+        
 /*        
         for(i=0;i<src_len;i++)
             {
@@ -581,11 +593,17 @@ int main(int argc, char **argv)
             ret=copy_nal(srcbuf,src_len,more_len, nal_buf, &len,fp2);
             if (ret==-1) break;
             more_len=ret;
-            printf("nal_buf len is %d,more_len:%d\n", len,more_len);
+            
+
+            //printf("nal_buf len is %d,more_len:%d\n", len,more_len);
             //sleep(1000);
             ret = h264nal2rtp_send(25, nal_buf, len, CLIENT_IP_LIST);
             if (ret != -1)
                 usleep(1000 * 20);
+
+            if(src_len==max_buf && src_len-more_len<min_buf){
+                break;
+            }
         }
     }
 
