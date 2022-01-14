@@ -6,6 +6,7 @@
 #include <arpa/inet.h>
 #include <sys/types.h>
 #include <sys/socket.h>
+#include <fcntl.h>
 #include "h264tortp.h"
 
 #define DEFAULT_DEST_PORT           5004
@@ -352,8 +353,8 @@ static int h264nal2rtp_send(int framerate, uint8_t *pstStream, int nalu_len, lin
     return 0;
 } /* void *h264tortp_send(VENC_STREAM_S *pstream, char *rec_ipaddr) */
 
-static int copy_nal_from_file(FILE *fp, uint8_t *buf, int *len);
-static int copy_nal_from_file(FILE *fp, uint8_t *buf, int *len)
+static int copy_nal_from_file(int fp, uint8_t *buf, int *len);
+static int copy_nal_from_file(int fp, uint8_t *buf, int *len)
 {
     char tmpbuf[4];     /* i have forgotten what this var mean */
     char tmpbuf2[1];    /* i have forgotten what this var mean */
@@ -369,7 +370,8 @@ static int copy_nal_from_file(FILE *fp, uint8_t *buf, int *len)
     *len = 0;
 
     do {
-        ret = fread(tmpbuf2, 1, 1, fp);
+        //ret = fread(tmpbuf2, 1, 1, fp);
+        ret = read(fp,tmpbuf2,1);
         if (!ret) {
             return -1;
         }
@@ -428,19 +430,108 @@ static int copy_nal_from_file(FILE *fp, uint8_t *buf, int *len)
     return *len;
 } /* static int copy_nal_from_file(FILE *fp, char *buf, int *len) */
 
+static int copy_nal(char *src,int src_len,int more_len, uint8_t *buf, int *len,int fp2);
+static int copy_nal(char *src,int src_len,int more_len, uint8_t *buf, int *len,int fp2)
+{
+    char tmpbuf[4];     /* i have forgotten what this var mean */
+    char tmpbuf2[1];    /* i have forgotten what this var mean */
+    int flag = 0;       /* i have forgotten what this var mean */
+    int ret;
+    int read_count=more_len;
+
+#if 0
+    ret = fread(tmpbuf, 4, 1, fp);
+    if (!ret)
+        return 0;
+#endif
+
+    *len = 0;
+
+    while (1) {
+        //ret = fread(tmpbuf2, 1, 1, fp);
+        if (read_count>=src_len) {
+            printf("end read_count:%d, src_len:%d\n",read_count,src_len);
+            return -1;
+        }
+        else{
+            tmpbuf2[0]=src[read_count];
+            write(fp2,tmpbuf2,1);
+            //printf("src_len:%d,%d\n",src_len,read_count);
+            read_count++;
+        }
+
+
+        if (!flag && tmpbuf2[0] != 0x0) {
+            buf[*len] = tmpbuf2[0];
+            (*len)++;
+            // debug_print("len is %d", *len);
+        } else if (!flag && tmpbuf2[0] == 0x0) {
+            flag = 1;
+            tmpbuf[0] = tmpbuf2[0];
+            //printf("len is %d,", *len);
+        } else if (flag) {
+            switch (flag) {
+            case 1:
+                if (tmpbuf2[0] == 0x0) {
+                    flag++;
+                    tmpbuf[1] = tmpbuf2[0];
+                } else {
+                    flag = 0;
+                    buf[*len] = tmpbuf[0];
+                    (*len)++;
+                    buf[*len] = tmpbuf2[0];
+                    (*len)++;
+                }
+                break;
+            case 2:
+                if (tmpbuf2[0] == 0x0) {
+                    flag++;
+                    tmpbuf[2] = tmpbuf2[0];
+                } else if (tmpbuf2[0] == 0x1) {
+                    flag = 0;
+                    return read_count;
+                } else {
+                    flag = 0;
+                    buf[*len] = tmpbuf[0];
+                    (*len)++;
+                    buf[*len] = tmpbuf[1];
+                    (*len)++;
+                    buf[*len] = tmpbuf2[0];
+                    (*len)++;
+                }
+                break;
+            case 3:
+                if (tmpbuf2[0] == 0x1) {
+                    flag = 0;
+                    return read_count;
+                } else {
+                    flag = 0;
+                    break;
+                }
+            }
+        }
+
+    } 
+
+    return read_count;
+} /* static int copy_nal_from_file(FILE *fp, char *buf, int *len) */
+
 int main(int argc, char **argv)
 {
-    FILE *fp;
-    FILE *fp_test;
+    int fp,fp2;
+    //FILE *fp_test;
     int len;
-    int ret;
+    int ret,i=0;
+    char tmpbuf[1];
 
     if (argc < 3) {
         fprintf(stderr, "usage: %s <inputfile> <dstip> [dst_port]\n", argv[0]);
         return -1;
     }
 
-    fp = fopen(argv[1], "r");
+    //fp = fopen(argv[1], "r");
+    fp2 = open("new.h264",O_RDWR | O_CREAT | O_TRUNC, 0777);
+    fp = open(argv[1],O_RDONLY);
     if (!fp) {
         perror("fopen");
         exit(errno);
@@ -463,24 +554,58 @@ int main(int argc, char **argv)
     add_client_list(CLIENT_IP_LIST, argv[2]);
 
     fprintf(stderr, "DEST_PORT is %d\n", DEST_PORT);
-    while (copy_nal_from_file(fp, nal_buf, &len) != -1) {
-#if 0
-        fputc(0, fp_test);
-        fputc(0, fp_test);
-        fputc(0, fp_test);
-        fputc(1, fp_test);
-        fwrite(nal_buf, len, 1, fp_test);
-        
-#endif
-        //fprintf(stderr, "nal_buf len is %d\n", len);
-        ret = h264nal2rtp_send(25, nal_buf, len, CLIENT_IP_LIST);
-        if (ret != -1)
-            usleep(1000 * 20);
+    int max_buf=1024*800;
+    char srcbuf[max_buf];
+    int src_len=1;
+    int more_len=0;
+    while (src_len>0) {
+        src_len=read(fp,srcbuf,max_buf);
+        //printf("%s",srcbuf);
+        //continue;
+        ret=0;
+        more_len=0;
+        i++;
+        //printf("read file: %d\n",src_len);
+/*        
+        for(i=0;i<src_len;i++)
+            {
+                tmpbuf[0]=srcbuf[i];
+                write(fp2,tmpbuf,1);
+                //printf("write %d\n",i);
+            }
+            close(fp2);
+            return 0;
+*/
+        while (more_len<src_len) {
+            //printf("copy nal: %d\n",i);
+            ret=copy_nal(srcbuf,src_len,more_len, nal_buf, &len,fp2);
+            if (ret==-1) break;
+            more_len=ret;
+            printf("nal_buf len is %d,more_len:%d\n", len,more_len);
+            //sleep(1000);
+            ret = h264nal2rtp_send(25, nal_buf, len, CLIENT_IP_LIST);
+            if (ret != -1)
+                usleep(1000 * 20);
+        }
     }
-    //debug_print();
-#if 0
-    fclose(fp_test);
-#endif
-    fclose(fp);
+
+    close(fp);
+    close(fp2);
     return 0;
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
