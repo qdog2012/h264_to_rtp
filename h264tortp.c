@@ -516,13 +516,19 @@ static int copy_nal(char *src,int src_len,int more_len, uint8_t *buf, int *len,i
     return read_count;
 } /* static int copy_nal_from_file(FILE *fp, char *buf, int *len) */
 
+int get_test_file(int fp,char *buf,int *len)
+{
+    *len=read(fp,buf,50000);
+    return *len;
+}
+
 int main(int argc, char **argv)
 {
     int fp,fp2;
     //FILE *fp_test;
     int len;
     int ret,i=0;
-    char tmpbuf[1];
+    //char tmpbuf[1];
 
     if (argc < 3) {
         fprintf(stderr, "usage: %s <inputfile> <dstip> [dst_port]\n", argv[0]);
@@ -554,24 +560,67 @@ int main(int argc, char **argv)
     add_client_list(CLIENT_IP_LIST, argv[2]);
 
     fprintf(stderr, "DEST_PORT is %d\n", DEST_PORT);
-    int max_buf=1024*200;
+    int max_buf=1024*400;
     int min_buf=1024*50;
     char srcbuf[max_buf];
-    int src_len=1;
+    int src_len=0;
+    char tmpbuf[max_buf];
+    int tmp_len=1;
     int more_len=0;
-    while (src_len>0) {
+    int is_append=0;
+    while (tmp_len>0) {
+        get_test_file(fp,tmpbuf,&tmp_len);
+        if (tmp_len>0)
+        {
+            
+            if (more_len>0 && more_len<src_len){
+                memcpy(srcbuf,srcbuf+more_len,src_len-more_len);
+                src_len=src_len-more_len;
+                more_len=0;
+                is_append=1;
+                //printf("more_len:%d, src_len:%d\n",more_len,src_len);
+            }
 
+            if (src_len<min_buf){
+                memcpy(srcbuf+src_len,tmpbuf,tmp_len);
+                src_len=src_len+tmp_len;
+                //printf("get again!\n");
+                is_append=1;
+                continue;
+            }
+            else if(is_append){
+                memcpy(srcbuf+src_len,tmpbuf,tmp_len);
+                src_len=src_len+tmp_len;
+                is_append=0;
+            }
+            else{
+                src_len=tmp_len;
+                memcpy(srcbuf,tmpbuf,tmp_len);
+            }
+            //printf("tmp_len:%d, src_len:%d\n",tmp_len,src_len);
+        }
+        else{
+            if (more_len>0 && more_len<src_len){
+                memcpy(srcbuf,srcbuf+more_len,src_len-more_len);
+                src_len=src_len-more_len;
+                more_len=0;
+            }
+        }
+
+
+/*
         if (more_len>0 && more_len!=src_len){
             memcpy(srcbuf,srcbuf+more_len,src_len-more_len);
             printf("merga buffers, more_len:%d, src_len:%d\n",more_len,src_len);
-            src_len=read(fp,srcbuf+(src_len-more_len),max_buf-(src_len-more_len)) + src_len - more_len;
+            //src_len=read(fp,srcbuf+(src_len-more_len),max_buf-(src_len-more_len)) + src_len - more_len;
+            
             //src_len=max_buf;
         }
         else{
             src_len=read(fp,srcbuf,max_buf);
             printf("read file: %d\n",src_len);
         }
-        
+*/        
         //printf("%s",srcbuf);
         //continue;
         ret=0;
@@ -593,6 +642,7 @@ int main(int argc, char **argv)
             ret=copy_nal(srcbuf,src_len,more_len, nal_buf, &len,fp2);
             if (ret==-1) {
                 more_len=0;
+                is_append=0;
                 break;
             }
             more_len=ret;
@@ -600,15 +650,19 @@ int main(int argc, char **argv)
 
             //printf("nal_buf len is %d,more_len:%d\n", len,more_len);
             //sleep(1000);
-            ret = h264nal2rtp_send(25, nal_buf, len, CLIENT_IP_LIST);
-            if (ret != -1)
-                usleep(1000 * 20);
 
-            if(src_len==max_buf && src_len-more_len<min_buf){
-                printf("%d# more_len:%d, src_len:%d\n",i,more_len,src_len);
+            ret = h264nal2rtp_send(25, nal_buf, len, CLIENT_IP_LIST);
+            // if (ret != -1)
+            //     usleep(1000 * 20);
+
+            if(tmp_len>0 && src_len-more_len<min_buf){
+                
+                //printf("%d# more_len:%d, src_len:%d\n",i,more_len,src_len);
                 break;
             }
         }
+        //if(i>=2) break;
+        if(tmp_len<=0) break;
     }
 
     close(fp);
